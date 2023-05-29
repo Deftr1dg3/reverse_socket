@@ -28,11 +28,33 @@ class File:
         self._target.sendall(packet)
         
     def _get_packet(self) -> str:
-        response_length = struct.unpack("<L", self._target.recv(4))[0]
-        raw_response = self._target.recv(response_length)
-        str_response = raw_response.decode("utf-8")
-        return str_response
+        data_size = struct.unpack("<L", self._target.recv(4))[0]
+        data = self._get_data_by_chuncks(data_size)
+        string_data = data.decode("utf-8")
+        return string_data
     
+    def _get_chunck(self, chunck_size: (int | None) = None) -> bytes:
+        if chunck_size is None:
+            chunck_size = self._chunck_size
+        chunck = self._target.recv(chunck_size)
+        return chunck 
+    
+    def _get_data_by_chuncks(self, data_size: int, progress_bar: bool = False) -> bytes:
+        data = b""
+        pbar = None
+        if progress_bar:
+            pbar = tqdm(total=data_size)
+        while len(data) < data_size:
+            if (rest_of_data := (data_size - len(data))) < self._chunck_size:
+                data += self._get_chunck(rest_of_data)
+                if pbar:
+                    pbar.update(rest_of_data)
+            else:
+                data += self._get_chunck()
+                if pbar:
+                    pbar.update(rest_of_data)
+        return data
+        
     def _create_json_packet(self, file_info: Any) -> bytes:
         file_info_serialized = json.dumps(file_info)
         file_info_bytes = file_info_serialized.encode("utf-8")
@@ -41,10 +63,11 @@ class File:
         return packet
     
     def _get_json_packet(self) -> list:
-        info_length = struct.unpack("<L", self._target.recv(4))[0]
-        file_info_serialized = self._target.recv(info_length).decode("utf-8")
-        file_info = json.loads(file_info_serialized)
-        return file_info
+        data_size = struct.unpack("<L", self._target.recv(4))[0]
+        data = self._get_data_by_chuncks(data_size)
+        string_data = data.decode("utf-8")
+        loaded_data = json.loads(string_data)
+        return loaded_data       
 
     def _get_file_name(self, path: str) -> str:
         file_name = os.path.basename(path)
@@ -66,7 +89,6 @@ class File:
         print(outcome)
         return outcome
 
-
 class UploadFile(File):
     def _get_folder_location(self, path: str) -> str:
         folder_location = os.path.dirname(path)
@@ -84,9 +106,6 @@ class UploadFile(File):
         data_size = len(data)
         return data_size 
     
-    def _send_chunck(self, chunck) -> None:
-        self._target.sendall(chunck) 
-    
     def _get_file_data(self, path: str) -> bytes:
         with open(path, "rb") as f:
             data = f.read()
@@ -96,10 +115,10 @@ class UploadFile(File):
         with tqdm(total=data_size) as pbar:
             for i in range(0, data_size, self._chunck_size):
                 if data_size < self._chunck_size:
-                    self._send_chunck(data[-data_size:])
+                    self._send_packet(data[-data_size:])
                     pbar.update(data_size)
                 else:
-                    self._send_chunck(data[i: i + self._chunck_size])
+                    self._send_packet(data[i: i + self._chunck_size])
                     data_size -= self._chunck_size
                     pbar.update(self._chunck_size)
         
@@ -122,32 +141,14 @@ class UploadFile(File):
         
         
 class DownloadFile(File):
-    def _get_chunck(self, chunck_size: (int | None) = None) -> bytes:
-        if chunck_size is None:
-            chunck_size = self._chunck_size
-        chunck = self._target.recv(chunck_size)
-        return chunck 
-    
     def _download_data(self, data_size: int, save_as: str) -> None:
-        data = b""
-        with tqdm(total=data_size) as pbar:
-            while data_size:
-                if data_size < self._chunck_size:
-                    chunck = self._get_chunck(data_size)
-                    pbar.update(data_size)
-                    data_size = 0 
-                else:
-                    chunck = self._get_chunck()
-                    data_size -= self._chunck_size 
-                    pbar.update(self._chunck_size)
-                data += chunck     
+        data = self._get_data_by_chuncks(data_size, progress_bar=True)    
         with open(save_as, "wb") as f:
             f.write(data)
         
     def download_file(self) -> None:
         path = self._create_packet(self._path)
         self._send_packet(path)
-        
         self._get_path_confirmation()
         
         file_info = self._get_json_packet()
@@ -166,17 +167,19 @@ class UploadDownloadDirectory(UploadFile, DownloadFile):
         folder_location = os.path.dirname(path)
         return folder_location
 
-    def _get_files(self, path: str) -> list:
+    def _get_files(self, path: str) -> list[tuple[int, str]]:
         directories = os.walk(path)
-        files = [directory[0] + os.sep + file for directory in directories for file in directory[2]]
+        files = []
+        for directory in directories:
+            for file in directory[2]:
+                file_path = os.path.join(directory[0], file)
+                data_size = os.path.getsize(file_path)
+                files.append((data_size, file_path))
         return files
     
-    def _upload_directory_data(self, directory: list[str]) -> None:
-        for file in directory:
+    def _upload_directory_data(self, directory: list[tuple[int, str]]) -> None:
+        for data_size, file in directory:
             data = self._get_file_data(file)
-            data_size = self._get_data_size(data)
-            data_size_packet = self._create_packet(str(data_size))
-            self._send_packet(data_size_packet)
             print(f"Uploading {file} .. .. ..")
             self._upload_data(data, data_size)
     
@@ -191,18 +194,16 @@ class UploadDownloadDirectory(UploadFile, DownloadFile):
         self._send_packet(json_directory)
         
         self._upload_directory_data(directory)
-        
         self._outcome()
       
-    def _download_directory_data(self, directory: list[str]):
-        for file_path in directory:
-            file_name = self._get_file_name(file_path)
-            inner_folder = self._get_folder(file_path)
-            local_folder = self._destination + os.sep + inner_folder.strip("." + os.sep)
-            save_as = local_folder + os.sep + file_name
+    def _download_directory_data(self, directory: list[tuple[int, str]]):
+        for data_size, file in directory:
+            file_name = self._get_file_name(file)
+            inner_folder = self._get_folder(file)
+            local_folder = os.path.join(self._destination, inner_folder.strip("./\\"))
+            save_as = os.path.join(local_folder, file_name)
             os.makedirs(local_folder, exist_ok=True)
-            data_size = int(self._get_packet())
-            print(f"Downloading {file_path} - size: {data_size} .. .. ..")
+            print(f"Downloading {file} - size: {data_size} .. .. ..")
             self._download_data(data_size, save_as)  
 
     def download_directory(self):

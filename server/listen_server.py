@@ -10,7 +10,7 @@ Port = int
 
 
 class ListenServer:
-    def __init__(self, connections: Connections, host: Host = "192.168.1.38", port: Port = 8080) -> None:
+    def __init__(self, connections: Connections, host: Host = "192.168.1.45", port: Port = 8080) -> None:
         self._host = host 
         self._port = port 
         self._connections = connections

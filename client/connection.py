@@ -5,7 +5,7 @@ import socket
 
 
 class Connection:
-    def __init__(self, host: str="192.168.1.38", port: int=8080) -> None:
+    def __init__(self, host: str="192.168.1.45", port: int=8080) -> None:
         self._host = host 
         self._port = port 
     
