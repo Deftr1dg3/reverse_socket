@@ -38,3 +38,4 @@ This application creates a reversed socket on the target PC. The socket connects
 Meanwhyle it just returns the error message.
 
 6. Additionally, a "restart_clients_socket" method can be added to improve robustness.
+7. Change threading to async.
