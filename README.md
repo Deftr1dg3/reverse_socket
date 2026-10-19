@@ -37,5 +37,9 @@ This application creates a reversed socket on the target PC. The socket connects
 5. Different behavior can be implemented for different kinds of Exceptions.
 Meanwhyle it just returns the error message.
 
-6. Additionally, a "restart_clients_socket" method can be added to improve robustness.
-7. Change threading to async.
+6. Additionally, a "restart_clients_socket" method should be added to improve robustness.
+7. Change connections handling from threading to async as we use only one active connection at a time.
+8. Add CLI interface to control both the client and the server.
+9. Add tests to the project.
+10. Use Ruff and Mypy to bring the project to the one standard.
+11. Resolve editors issue on the client's side.
